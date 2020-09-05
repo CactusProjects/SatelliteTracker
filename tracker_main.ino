@@ -1,123 +1,100 @@
+// Adapted September 2020 for use with ESP8266 Hardware by http://cactusprojects.com
+// Current project located at https://github.com/CactusProjects/SatelliteTracker
+// Forked from https://github.com/alexchang0229/SatelliteTracker
+
 #include <Sgp4.h>
-#include <SPI.h>
-#include <WiFi101.h>
+#include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
-#include <RTCZero.h>
+#include <NTPClient.h>
 #include <AccelStepper.h>
+#include <ESP8266HTTPClient.h>
 
-// To be modified by user //
-#define SECRET_SSID "ChangVan2017"  // Your Network name.
-#define SECRET_PASS "ohcanada" // Your Network password.
-#define DEBUG                 //Enable serial output.
-const int timeZone = -7;      //Your Time zone.
-char TLE[500];                //Variable to store satellite TLEs.
-char satnames[4][30] = {"RADARSAT-2","NEOSSAT","M3MSAT ","SCISAT"};// Names of satellites.
-char satURL[4][30] = {"/satcat/tle.php?CATNR=32382","/satcat/tle.php?CATNR=39089",
-     "/satcat/tle.php?CATNR=41605","/satcat/tle.php?CATNR=27858"}; // URL of Celestrak TLEs for satellites (In same order as names).
-char TLE1[4][70]; char TLE2[4][70];
-float myLat = 52.12; float myLong = -106.663; float myAlt = 482;   // Your latitude, longitude and altitude.
-int numSats = 4;    // Number of satellites to track.
+// ### USER VARIABLES ### //
+#define WIFI_SSID ""  // Your Network name.
+#define WIFI_PASS ""     // Your Network password.
+float myLat = 48.85341; float myLong = 2.3488; float myAlt = 42;   // Your latitude, longitude and altitude. https://latitude.to
 
-// Azimuth stepper pins //
-#define AZmotorPin1  9       // IN1 on the ULN2003 driver
-#define AZmotorPin2  10      // IN2 on the ULN2003 driver
-#define AZmotorPin3  11      // IN3 on the ULN2003 driver
-#define AZmotorPin4  12      // IN4 on the ULN2003 driver
+const int timeZone = 0;            // Your Time zone relative to GMT.
+
+int numSats = 5;                                                    // Number of satellites to track.
+char satnames[5][50] = {"COSMOS-1271","RADARSAT-2","NEOSSAT","M3MSAT ","SCISAT"}; // Names of satellites.
+char satURL[5][50] = {"/satcat/tle.php?INTDES=1981-046","/satcat/tle.php?CATNR=32382","/satcat/tle.php?CATNR=39089","/satcat/tle.php?CATNR=41605","/satcat/tle.php?CATNR=27858"}; // URL of Celestrak TLEs for satellites (In same order as names).
+
+//  ### I/O Pins ###      //
+//  Azimuth stepper pins  //
+#define AZmotorPin1  16   // IN1 on the ULN2003 driver - D0 ESP8266
+#define AZmotorPin2  5    // IN2 on the ULN2003 driver - D1 ESP8266
+#define AZmotorPin3  4    // IN3 on the ULN2003 driver - D2 ESP8266
+#define AZmotorPin4  0    // IN4 on the ULN2003 driver - D3 ESP8266
 // Elevation stepper pins //
-#define ELmotorPin1  2  
-#define ELmotorPin2  3      
-#define ELmotorPin3  4     
-#define ELmotorPin4  5    
+#define ELmotorPin1  2    // IN1 on the ULN2003 driver - D4 ESP8266  
+#define ELmotorPin2  14   // IN2 on the ULN2003 driver - D5 ESP8266     
+#define ELmotorPin3  12   // IN3 on the ULN2003 driver - D6 ESP8266   
+#define ELmotorPin4  13   // IN4 on the ULN2003 driver - D7 ESP8266  
 
-int satAZsteps; int satELsteps; int turns = 0;
-float oneTurn = 4096;     // Number of steps per one rotation for stepper motor.
+// ### HARDWARE VARIABLES ### //
+float oneTurn = 4076;         // Number of steps per one rotation for stepper motor.
 #define MotorInterfaceType 8  // Define the AccelStepper interface type; 4 wire motor in half step mode:
-AccelStepper stepperAZ = AccelStepper(MotorInterfaceType, AZmotorPin1, AZmotorPin3, AZmotorPin2, AZmotorPin4);
-AccelStepper stepperEL = AccelStepper(MotorInterfaceType, ELmotorPin1, ELmotorPin3, ELmotorPin2, ELmotorPin4);
 
-Sgp4 sat;
-RTCZero rtc;
-
-char ssid[] = SECRET_SSID;    // your network SSID (name)
-char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
+// ### PROGRAM VARIABLES ### //
+#define DEBUG                       // Enable serial output.
+char TLE[500];                      // Variable to store satellite TLEs.
+char TLE1[5][70]; char TLE2[5][70]; // Variable to store satellite TLEs.
+int wifiStatus;
+int debug = 1;
+int satAZsteps; int satELsteps; int turns = 0;
 int i; int k; int SAT; int nextSat; int AZstart; long passEnd; int satVIS;
 char satname[] = " ";
 int passStatus = 0;
 char server[] = "104.168.149.178";    //Web address to get TLE (CELESTRAK)
-int  year; int mon; int day; int hr; int min; double sec; int today;
+int  year; int mon; int day; int hr; int minute; double sec; int today;
 long nextpassEpoch; long upcomingPasses[4];
-int status = WL_IDLE_STATUS;
-unsigned long unixtime;
-unsigned long testTime = 1593789900;
 unsigned long timeNow = 0;
 
-// Used for Network Time Protocol (NTP)
-unsigned int localPort = 2390; // local port to listen for UDP packets
-IPAddress timeServer(129, 6, 15, 28); // time.nist.gov NTP server
-const int NTP_PACKET_SIZE = 48; // NTP time stamp is in the first 48 bytes of the message
-byte packetBuffer[ NTP_PACKET_SIZE]; //buffer to hold incoming and outgoing packets
-WiFiUDP Udp; // A UDP instance to let us send and receive packets over UDP
+// ### INITIALISATIONS ### //
+AccelStepper stepperAZ = AccelStepper(MotorInterfaceType, AZmotorPin1, AZmotorPin3, AZmotorPin2, AZmotorPin4);
+AccelStepper stepperEL = AccelStepper(MotorInterfaceType, ELmotorPin1, ELmotorPin3, ELmotorPin2, ELmotorPin4);
+Sgp4 sat;
+HTTPClient http;
+WiFiUDP udp;
+NTPClient ntp(udp, "europe.pool.ntp.org", 0); //[3]=utcOffsetInSeconds
+WiFiClient client; // Initialize the Ethernet client library
 
-// Initialize the Ethernet client library
-WiFiClient client;
 
 void setup() {
-  
-  //Initialize serial and wait for port to open:
-  #ifdef DEBUG
-    Serial.begin(9600);
-    while (!Serial) {
-      delay(10);
-    }
-  #endif
+  Serial.begin(9600); while (!Serial) {delay(10);} //Initialize serial and wait for port to open:
+
   // Setup stepper movements //
   stepperEL.setMaxSpeed(1000);
   stepperEL.setCurrentPosition(-227); // Elevation stepper starts at -227 steps (20 degrees above horizon).
   stepperEL.setAcceleration(100);
   stepperAZ.setMaxSpeed(1000);
-  stepperAZ.setCurrentPosition(0);  // Azimuth stepper starts at 0.
+  stepperAZ.setCurrentPosition(0);    // Azimuth stepper starts at 0.
   stepperAZ.setAcceleration(100);
   
-  // check for the presence of wifi shield:
-  if (WiFi.status() == WL_NO_SHIELD) {
-    #ifdef DEBUG
-      Serial.println("WiFi shield not present");
-    #endif
-    while(true); // don't continue:
-  }
-
-  // attempt to connect to WiFi network:
-  while (status != WL_CONNECTED) {
-    #ifdef DEBUG
-      Serial.print("Attempting to connect to SSID: ");
-      Serial.println(ssid);
-    #endif
-    // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
-    status = WiFi.begin(ssid, pass);
-    // wait 5 seconds for connection:
-    delay(5000);
-  }
-  #ifdef DEBUG
-    Serial.println("Connected to wifi");
-  #endif
+  new_connection(); // Connects to Wifi
   
   sat.site(myLat,myLong,myAlt); //set location latitude[°], longitude[°] and altitude[m]
-  rtc.begin();
 
   // Get Unix time //
   while(timeNow == 0){
-    unixtime = readLinuxEpochUsingNTP();
-    rtc.setEpoch(unixtime);
-    today = rtc.getDay();
-    timeNow = rtc.getEpoch();
+    ntp.update();
+    today = ntp.getDay();
+    timeNow = ntp.getEpochTime();
   } 
   #ifdef DEBUG
-    Serial.println("unixtime: " + String(unixtime));
+    Serial.println("today: " + String(today));
+    Serial.println("timeNow (unix timestamp): " + String(timeNow));
   #endif
   
   // Get TLEs //
   for(SAT = 0; SAT < numSats; SAT++){
     getTLE(SAT);
+    Serial.println("Back from TLE: ");
+    Serial.println(satname);
+    Serial.println(TLE1[SAT]);
+    Serial.println(TLE2[SAT]);
+    
     sat.init(satname,TLE1[SAT],TLE2[SAT]);     //initialize satellite parameters
     sat.findsat(timeNow);
     upcomingPasses[SAT] = Predict(1);
@@ -141,16 +118,20 @@ void setup() {
     }  
     Serial.println("Next satellite: " + String(nextSat));
   #endif
+
+  standby();
 }
 
 void loop() {
-  timeNow = rtc.getEpoch();   // Update time.
+  ntp.update();
+  timeNow = ntp.getEpochTime();   // Update time.
+  Serial.print("Time Now: ");Serial.println(timeNow);  
   sat.findsat(timeNow);
   satAZsteps = round(sat.satAz*oneTurn/360);   //Convert degrees to stepper steps
   satELsteps = -round(sat.satEl*oneTurn/360);  
   #ifdef DEBUG
-    invjday(sat.satJd , timeZone,true, year, mon, day, hr, min, sec);
-    Serial.println("\nLocal time: " + String(day) + '/' + String(mon) + '/' + String(year) + ' ' + String(hr) + ':' + String(min) + ':' + String(sec));
+    invjday(sat.satJd , timeZone, true, year, mon, day, hr, minute, sec);
+    Serial.println("\nLocal time: " + String(day) + '/' + String(mon) + '/' + String(year) + ' ' + String(hr) + ':' + String(minute) + ':' + String(sec));
     Serial.println("azimuth = " + String( sat.satAz) + " elevation = " + String(sat.satEl) + " distance = " + String(sat.satDist));
     Serial.println("latitude = " + String( sat.satLat) + " longitude = " + String( sat.satLon) + " altitude = " + String( sat.satAlt));
     Serial.println("AZStep pos: " + String(stepperAZ.currentPosition()));
@@ -194,13 +175,13 @@ void loop() {
   
   
   // Update TLE & Unix time everyday.//
-  if(passStatus == 0 && today != rtc.getDay()){
+  if(passStatus == 0 && today != ntp.getDay()){
     for(SAT = 0; SAT < numSats; SAT++){
       getTLE(SAT);
     }
-    unixtime = readLinuxEpochUsingNTP();
-    rtc.setEpoch(unixtime);
-    today = rtc.getDay();
+    ntp.update();
+    timeNow = ntp.getEpochTime();
+    today = ntp.getDay();
     #ifdef DEBUG
       Serial.println("Updating TLEs and time");
     #endif
@@ -307,4 +288,56 @@ void postpass(){
     passStatus = 0;
   }
 
+}
+
+void new_connection() {
+    WiFi.begin( WIFI_SSID, WIFI_PASS );
+    int loops = 0;
+    int retries = 0;
+    wifiStatus = WiFi.status();
+    while ( wifiStatus != WL_CONNECTED )
+    {
+      retries++;
+      if( retries == 300 )
+      {
+          if (debug == 1) {Serial.println( "No connection after 300 steps, powercycling the WiFi radio. I have seen this work when the connection is unstable" );}
+          WiFi.disconnect();
+          delay( 10 );
+          WiFi.forceSleepBegin();
+          delay( 10 );
+          WiFi.forceSleepWake();
+          delay( 10 );
+          WiFi.begin( WIFI_SSID, WIFI_PASS );
+      }
+      if ( retries == 600 )
+      {
+          WiFi.disconnect( true );
+          delay( 1 );
+          WiFi.mode( WIFI_OFF );
+          WiFi.forceSleepBegin();
+          delay( 10 );
+          
+          if( loops == 3 )
+          {
+              if (debug == 1) {Serial.println( "That was 3 loops, still no connection so let's go to deep sleep for 2 minutes" );}
+              Serial.flush();
+              ESP.deepSleep( 120000000, WAKE_RF_DISABLED );
+          }
+          else
+          {
+              if (debug == 1) {Serial.println( "No connection after 600 steps. WiFi connection failed, disabled WiFi and waiting for a minute" );}
+          }
+          
+          delay( 60000 );
+          return;
+      }
+      delay( 50 );
+      wifiStatus = WiFi.status();
+    }
+    Serial.print(wifiStatus);Serial.print("My IP: ");Serial.println(WiFi.localIP()); 
+}
+
+void close_connection() {
+  WiFi.disconnect( true );
+  delay( 1 );
 }

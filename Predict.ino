@@ -12,10 +12,10 @@ long Predict(int many){
         if ( error == 1){ //no error, prints overpass information
           nextpassEpoch = (overpass.jdstart-2440587.5) * 86400;
           AZstart = overpass.azstart;
-          invjday(overpass.jdstart ,timeZone ,true , year, mon, day, hr, min, sec);   // Convert Julian date to print in serial.
+          invjday(overpass.jdstart ,timeZone ,true , year, mon, day, hr, minute, sec);   // Convert Julian date to print in serial.
           #ifdef DEBUG
           Serial.println("Next pass for: " + String(satnames[SAT]) + " In: " + String(nextpassEpoch-timeNow));
-          Serial.println("Start: az=" + String(overpass.azstart) + "° " + String(hr) + ':' + String(min) + ':' + String(sec));
+          Serial.println("Start: az=" + String(overpass.azstart) + "° " + String(hr) + ':' + String(minute) + ':' + String(sec));
           #endif
         }else{
             #ifdef DEBUG
