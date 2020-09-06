@@ -2,11 +2,11 @@
 This repository contains the code for the 3D printed satellite tracker ported to ESP8266. (forked from original Arduino MKR 1000 hardware created by Alex Chang)<br />
 <img src="https://hackster.imgix.net/uploads/attachments/1156979/_ijWqYco4SG.blob?auto=compress%2Cformat&w=900&h=675&fit=min" width="600"> <br />
 
-### Getting started
+# Getting started
 Hardware:
-*ESP8266
-*28BYJ-48 Stepper Motors & ULN2003 Driver board (quantity 2) (Note: Stepper should not be powered from ESP regulator!)
-*3D Printed Satellite Model 
+* ESP8266
+* 28BYJ-48 Stepper Motors & ULN2003 Driver board (quantity 2) (Note: Stepper should not be powered from ESP regulator!)
+* 3D Printed Satellite Model (https://www.thingiverse.com/thing:4541354)
 
 Software:
 * Arduino IDE
@@ -76,7 +76,7 @@ Next satellite is: NEOSSAT in: 663
 * The steppers have no way of determining their positions so they assume they start at AZ = 0, EL = 20, you will have to set this up by hand.
 
 # Ported to ESP by CactusProjects, Original Author: Alex Chang
-Contact for Alex: yuc888@mail.usask.ca
+Contact for Alex: yuc888@mail.usask.ca <br />
 Link to the original project on Hackster.io: https://www.hackster.io/alex_chang/satellite-tracker-13a9aa <br />
 
 
